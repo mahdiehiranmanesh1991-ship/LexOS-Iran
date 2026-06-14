@@ -19,6 +19,21 @@ import type {
 } from "@/lib/domain/types";
 import { daysFromToday, toISODate } from "@/lib/jalali";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  type AppSettings,
+  type AuditLog,
+  type BrainProfile,
+  type BrainSource,
+  type BrainSourceKind,
+  type CustomTemplate,
+  type DeepPartial,
+  type Invoice,
+  type Subscription,
+  type UserSession,
+  applyPatch,
+  mergeSettings,
+  PLAN_FA,
+} from "@/lib/domain/settings";
 import type {
   CaseDetail,
   CaseFilter,
@@ -522,5 +537,128 @@ export class SupabaseDataSource implements DataSource {
       .from("cases")
       .update({ updated_at: new Date().toISOString() })
       .eq("id", input.case_id);
+  }
+
+  /* ─── Settings control center ─── */
+
+  async getSettings(): Promise<AppSettings> {
+    const { data } = await this.client
+      .from("profiles")
+      .select("settings")
+      .eq("id", this.userId)
+      .maybeSingle();
+    return mergeSettings((data as { settings?: unknown } | null)?.settings);
+  }
+
+  async updateSettings(patch: DeepPartial<AppSettings>): Promise<AppSettings> {
+    const current = await this.getSettings();
+    const next = applyPatch(current, patch);
+    await this.client.from("profiles").update({ settings: next }).eq("id", this.userId);
+    return next;
+  }
+
+  async listSessions(): Promise<UserSession[]> {
+    const { data } = await this.client
+      .from("user_sessions")
+      .select("*")
+      .order("current", { ascending: false })
+      .order("last_active", { ascending: false });
+    return (data ?? []) as unknown as UserSession[];
+  }
+
+  async revokeSession(id: string): Promise<void> {
+    await this.client.from("user_sessions").delete().eq("id", id).eq("current", false);
+  }
+
+  async revokeOtherSessions(): Promise<void> {
+    await this.client.from("user_sessions").delete().eq("current", false);
+  }
+
+  async listAuditLogs(): Promise<AuditLog[]> {
+    const { data } = await this.client
+      .from("audit_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    return (data ?? []) as unknown as AuditLog[];
+  }
+
+  async listBrainSources(): Promise<BrainSource[]> {
+    const { data } = await this.client
+      .from("brain_sources")
+      .select("*")
+      .order("created_at", { ascending: false });
+    return (data ?? []) as unknown as BrainSource[];
+  }
+
+  async getBrainProfile(): Promise<BrainProfile | null> {
+    const { data } = await this.client
+      .from("profiles")
+      .select("settings")
+      .eq("id", this.userId)
+      .maybeSingle();
+    const profile = (data as { settings?: { brain_profile?: BrainProfile } } | null)?.settings?.brain_profile;
+    return profile ?? null;
+  }
+
+  async addBrainSource(input: { title: string; kind: BrainSourceKind; text?: string }): Promise<BrainSource> {
+    const { data, error } = await this.client
+      .from("brain_sources")
+      .insert(
+        this.own({
+          title: input.title,
+          kind: input.kind,
+          status: "learning",
+          pages: input.text ? Math.max(1, Math.round(input.text.length / 1800)) : null,
+        }),
+      )
+      .select()
+      .single();
+    if (error) throw error;
+    return data as unknown as BrainSource;
+  }
+
+  async removeBrainSource(id: string): Promise<void> {
+    await this.client.from("brain_sources").delete().eq("id", id);
+  }
+
+  async listCustomTemplates(): Promise<CustomTemplate[]> {
+    const { data } = await this.client
+      .from("custom_templates")
+      .select("*")
+      .order("created_at", { ascending: false });
+    return (data ?? []) as unknown as CustomTemplate[];
+  }
+
+  async createCustomTemplate(input: { title: string; doc_kind: string; description: string }): Promise<CustomTemplate> {
+    const { data, error } = await this.client
+      .from("custom_templates")
+      .insert(this.own(input))
+      .select()
+      .single();
+    if (error) throw error;
+    return data as unknown as CustomTemplate;
+  }
+
+  async deleteCustomTemplate(id: string): Promise<void> {
+    await this.client.from("custom_templates").delete().eq("id", id);
+  }
+
+  async getSubscription(): Promise<Subscription> {
+    const settings = await this.getSettings();
+    const meta = PLAN_FA[settings.billing.plan];
+    return {
+      plan: settings.billing.plan,
+      cycle: settings.billing.cycle,
+      status: "active",
+      renews_at: new Date(Date.now() + 240 * 86_400_000).toISOString(),
+      seats: settings.billing.plan === "firm" ? 5 : 1,
+      price_rial: settings.billing.cycle === "yearly" ? meta.price_year : meta.price_month,
+    };
+  }
+
+  async listInvoices(): Promise<Invoice[]> {
+    // Billing/payment integration is a roadmap item; no invoices until connected.
+    return [];
   }
 }

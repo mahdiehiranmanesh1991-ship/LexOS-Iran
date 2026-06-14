@@ -52,6 +52,21 @@ import type {
   NewMessageInput,
   NewNoteInput,
 } from "./types";
+import {
+  type AppSettings,
+  type AuditLog,
+  type BrainProfile,
+  type BrainSource,
+  type BrainSourceKind,
+  type CustomTemplate,
+  type DeepPartial,
+  type Invoice,
+  type Subscription,
+  type UserSession,
+  applyPatch,
+  mergeSettings,
+  PLAN_FA,
+} from "@/lib/domain/settings";
 
 /**
  * In-memory demo store. Mutations work (per server process) so the public
@@ -73,8 +88,60 @@ interface DemoStore {
   analyses: AiAnalysis[];
   conversations: AiConversation[];
   messages: AiMessage[];
+  settings: AppSettings;
+  sessions: UserSession[];
+  auditLogs: AuditLog[];
+  brainSources: BrainSource[];
+  customTemplates: CustomTemplate[];
   seq: number;
 }
+
+function ago(mins: number): string {
+  return new Date(Date.now() - mins * 60_000).toISOString();
+}
+
+/** Seeds for the Settings control center (demo mode). */
+const demoSettings: AppSettings = mergeSettings({
+  profile: { display_name: "دکتر مهدیه ایرانمنش", headline: "وکیل پایه یک دادگستری — متخصص دعاوی ملکی و حقوقی", bio: "بیش از ده سال سابقه وکالت در دعاوی ملکی، قراردادی و تجاری.", avatar_color: "#047857" },
+  license: { bar_type: "kanoon", license_no: "۲۵۴۸۱", rank: "paye1", issue_year: "۱۳۹۳", province: "تهران", kanoon_name: "کانون وکلای دادگستری مرکز", specialties: ["ملکی", "حقوقی", "تجاری", "چک و اسناد تجاری"] },
+  office: { name: "دفتر وکالت ایرانمنش", type: "solo", phone: "۰۲۱۸۸۷۶۵۴۳۲", email: "office@iranmanesh.legal", website: "iranmanesh.legal", address: "تهران، سعادت‌آباد، بلوار دریا", city: "تهران", colleagues: 2, accent_color: "#047857" },
+  billing: { plan: "pro", cycle: "yearly" },
+});
+
+const demoSessions: UserSession[] = [
+  { id: "ses-1", device: "لپ‌تاپ", browser: "Chrome 141", os: "Windows 11", ip: "۲٫۱۸۸٫XX٫XX", location: "تهران، ایران", last_active: ago(2), current: true },
+  { id: "ses-2", device: "موبایل", browser: "Safari", os: "iOS 18", ip: "۵٫۱۲۰٫XX٫XX", location: "تهران، ایران", last_active: ago(190), current: false },
+  { id: "ses-3", device: "تبلت", browser: "Chrome", os: "Android 15", ip: "۹۱٫۹۹٫XX٫XX", location: "کرج، ایران", last_active: ago(2880), current: false },
+];
+
+const demoAudit: AuditLog[] = [
+  { id: "aud-1", action: "ورود به سامانه", detail: "ورود موفق با گذرواژه", ip: "۲٫۱۸۸٫XX٫XX", created_at: ago(2), level: "info" },
+  { id: "aud-2", action: "تولید پیش‌نویس", detail: "لایحه دفاعیه — پرونده مهریه خانم کریمی", ip: "۲٫۱۸۸٫XX٫XX", created_at: ago(46), level: "info" },
+  { id: "aud-3", action: "ثبت موعد قانونی", detail: "واخواهی پرونده کرج — توسط ایجنت مواعد", ip: "۲٫۱۸۸٫XX٫XX", created_at: ago(120), level: "info" },
+  { id: "aud-4", action: "خروجی داده", detail: "دانلود خروجی کامل پرونده‌ها (JSON)", ip: "۲٫۱۸۸٫XX٫XX", created_at: ago(1500), level: "security" },
+  { id: "aud-5", action: "تلاش ناموفق ورود", detail: "گذرواژه نادرست — مسدودسازی موقت", ip: "۱۸۵٫۱۱۰٫XX٫XX", created_at: ago(4300), level: "danger" },
+  { id: "aud-6", action: "تغییر تنظیمات امنیتی", detail: "فعال‌سازی رمزنگاری در حالت سکون", ip: "۲٫۱۸۸٫XX٫XX", created_at: ago(7200), level: "security" },
+];
+
+const demoBrainSources: BrainSource[] = [
+  { id: "br-1", title: "لایحه خلع ید — پرونده ۱۳۹۸/۵۲۴", kind: "brief", status: "learned", pages: 6, insights: ["تفکیک دقیق دعوای مالکیت از تصرف", "استناد محوری به ماده ۲۲ قانون ثبت", "لحن قاطع با جمله‌بندی کوتاه"], created_at: ago(5000) },
+  { id: "br-2", title: "دادخواست الزام به تنظیم سند", kind: "pleading", status: "learned", pages: 3, insights: ["ساختار خواسته دقیق و منجز", "ذکر زنجیره انتقال در شرح دادخواست"], created_at: ago(4000) },
+  { id: "br-3", title: "تجدیدنظرخواهی پرونده مشارکت در ساخت", kind: "appeal", status: "learning", pages: 9, insights: null, created_at: ago(30) },
+];
+
+const demoBrainProfile: BrainProfile = {
+  tone: "رسمی و قاطع",
+  avg_sentence_words: 18,
+  favorite_citations: ["ماده ۲۲ قانون ثبت", "ماده ۳۰۸ قانون مدنی", "ماده ۲۳۰ قانون مدنی", "مواد ۱۵۸ و ۱۶۱ ق.آ.د.م"],
+  signature_phrases: ["با عنایت به مراتب معروضه", "علی‌هذا", "نظر به اینکه", "بنا به جهات فوق‌الذکر"],
+  structure_notes: "مقدمه کوتاه، سپس بندبندی استدلال‌ها با «اولاً، ثانیاً»، استنادات در پایان هر بند، نتیجه‌گیری صریح.",
+  trained_on: 2,
+};
+
+const demoCustomTemplates: CustomTemplate[] = [
+  { id: "ct-tpl-1", title: "دادخواست خلع ید (الگوی شخصی)", doc_kind: "petition", description: "نسخه شخصی‌سازی‌شده با بند اجرت‌المثل و قلع و قمع", created_at: ago(9000) },
+  { id: "ct-tpl-2", title: "قرارداد مشارکت در ساخت — دفتر ایرانمنش", doc_kind: "contract", description: "با شرط فسخ تأخیر و وجه التزام روزانه", created_at: ago(12000) },
+];
 
 function freshStore(): DemoStore {
   const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -94,6 +161,11 @@ function freshStore(): DemoStore {
     analyses: clone(demoAnalyses),
     conversations: clone(demoConversations),
     messages: clone(demoMessages),
+    settings: clone(demoSettings),
+    sessions: clone(demoSessions),
+    auditLogs: clone(demoAudit),
+    brainSources: clone(demoBrainSources),
+    customTemplates: clone(demoCustomTemplates),
     seq: 1000,
   };
 }
@@ -627,5 +699,108 @@ export class DemoDataSource implements DataSource {
     });
     const c = s.cases.find((x) => x.id === input.case_id);
     if (c) c.updated_at = nowISO();
+  }
+
+  /* ─── Settings control center ─── */
+
+  async getSettings() {
+    return store().settings;
+  }
+
+  async updateSettings(patch: DeepPartial<AppSettings>) {
+    const s = store();
+    s.settings = applyPatch(s.settings, patch);
+    return s.settings;
+  }
+
+  async listSessions() {
+    return [...store().sessions].sort((a, b) => Number(b.current) - Number(a.current));
+  }
+
+  async revokeSession(id: string) {
+    const s = store();
+    s.sessions = s.sessions.filter((x) => x.id !== id || x.current);
+  }
+
+  async revokeOtherSessions() {
+    const s = store();
+    s.sessions = s.sessions.filter((x) => x.current);
+  }
+
+  async listAuditLogs() {
+    return [...store().auditLogs].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  async listBrainSources() {
+    return [...store().brainSources].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  async getBrainProfile() {
+    const learned = store().brainSources.filter((b) => b.status === "learned").length;
+    return learned > 0 ? { ...demoBrainProfile, trained_on: learned } : null;
+  }
+
+  async addBrainSource(input: { title: string; kind: BrainSourceKind; text?: string }) {
+    const s = store();
+    const b: BrainSource = {
+      id: nextId("br"),
+      title: input.title,
+      kind: input.kind,
+      status: "learning",
+      pages: input.text ? Math.max(1, Math.round(input.text.length / 1800)) : null,
+      insights: null,
+      created_at: nowISO(),
+    };
+    s.brainSources.push(b);
+    return b;
+  }
+
+  async removeBrainSource(id: string) {
+    const s = store();
+    s.brainSources = s.brainSources.filter((x) => x.id !== id);
+  }
+
+  async listCustomTemplates() {
+    return [...store().customTemplates].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  async createCustomTemplate(input: { title: string; doc_kind: string; description: string }) {
+    const s = store();
+    const t: CustomTemplate = {
+      id: nextId("ct-tpl"),
+      title: input.title,
+      doc_kind: input.doc_kind,
+      description: input.description,
+      created_at: nowISO(),
+    };
+    s.customTemplates.push(t);
+    return t;
+  }
+
+  async deleteCustomTemplate(id: string) {
+    const s = store();
+    s.customTemplates = s.customTemplates.filter((x) => x.id !== id);
+  }
+
+  async getSubscription(): Promise<Subscription> {
+    const s = store();
+    const plan = s.settings.billing.plan;
+    const cycle = s.settings.billing.cycle;
+    const meta = PLAN_FA[plan];
+    return {
+      plan,
+      cycle,
+      status: "active",
+      renews_at: new Date(Date.now() + 240 * 86_400_000).toISOString(),
+      seats: plan === "firm" ? 5 : 1,
+      price_rial: cycle === "yearly" ? meta.price_year : meta.price_month,
+    };
+  }
+
+  async listInvoices(): Promise<Invoice[]> {
+    return [
+      { id: "inv-1", number: "۱۴۰۴-۰۰۳", date: new Date(Date.now() - 30 * 86_400_000).toISOString(), amount_rial: 27_900_000, status: "paid" },
+      { id: "inv-2", number: "۱۴۰۳-۰۱۲", date: new Date(Date.now() - 395 * 86_400_000).toISOString(), amount_rial: 24_500_000, status: "paid" },
+    ];
   }
 }

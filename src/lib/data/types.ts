@@ -16,6 +16,18 @@ import type {
   Profile,
   Task,
 } from "@/lib/domain/types";
+import type {
+  AppSettings,
+  AuditLog,
+  BrainProfile,
+  BrainSource,
+  BrainSourceKind,
+  CustomTemplate,
+  DeepPartial,
+  Invoice,
+  Subscription,
+  UserSession,
+} from "@/lib/domain/settings";
 
 export interface CaseDetail extends LegalCase {
   parties: (CaseParty & { contact: Contact })[];
@@ -164,4 +176,26 @@ export interface DataSource {
   appendMessage(input: NewMessageInput): Promise<AiMessage>;
 
   addCaseEvent(input: NewEventInput): Promise<void>;
+
+  /* ─── Settings control center ─── */
+  getSettings(): Promise<AppSettings>;
+  updateSettings(patch: DeepPartial<AppSettings>): Promise<AppSettings>;
+
+  listSessions(): Promise<UserSession[]>;
+  revokeSession(id: string): Promise<void>;
+  revokeOtherSessions(): Promise<void>;
+
+  listAuditLogs(): Promise<AuditLog[]>;
+
+  listBrainSources(): Promise<BrainSource[]>;
+  getBrainProfile(): Promise<BrainProfile | null>;
+  addBrainSource(input: { title: string; kind: BrainSourceKind; text?: string }): Promise<BrainSource>;
+  removeBrainSource(id: string): Promise<void>;
+
+  listCustomTemplates(): Promise<CustomTemplate[]>;
+  createCustomTemplate(input: { title: string; doc_kind: string; description: string }): Promise<CustomTemplate>;
+  deleteCustomTemplate(id: string): Promise<void>;
+
+  getSubscription(): Promise<Subscription>;
+  listInvoices(): Promise<Invoice[]>;
 }
