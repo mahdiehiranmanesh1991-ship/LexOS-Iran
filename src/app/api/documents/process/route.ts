@@ -3,6 +3,7 @@ import { getDataSource } from "@/lib/data";
 import type { DocType } from "@/lib/domain/types";
 import { aiAvailable, anthropic, complete, hasAnthropic, modelFor } from "@/lib/ai/providers";
 import { createSupabaseServerClient, isDemoMode } from "@/lib/supabase/server";
+import { guardRequest } from "@/lib/security/guard";
 
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
@@ -19,6 +20,10 @@ const DOC_TYPES: DocType[] = [
  * Accepts multipart form: file? · text? · title · doc_type? · case_id?
  */
 export async function POST(req: NextRequest) {
+  // Daily upload quota + multipart size cap (header-checked, body untouched).
+  const guard = await guardRequest(req, "doc_upload");
+  if (!guard.ok) return guard.response;
+
   const form = await req.formData().catch(() => null);
   if (!form) return Response.json({ error: "درخواست نامعتبر است" }, { status: 400 });
 

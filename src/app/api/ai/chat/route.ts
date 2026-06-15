@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDataSource } from "@/lib/data";
 import type { AgentCode } from "@/lib/domain/types";
 import { routeIntent, runAgentStream, type StreamEvent } from "@/lib/ai/orchestrator";
+import { guardRequest } from "@/lib/security/guard";
 
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
@@ -28,8 +29,13 @@ const BodySchema = z.object({
  * Persists the exchange to ai_messages when a conversationId is provided.
  */
 export async function POST(req: NextRequest) {
-  const parsed = BodySchema.safeParse(await req.json().catch(() => null));
+  // Size + rate + abuse + stream-concurrency guard (acquires a stream slot).
+  const guard = await guardRequest(req, "ai_chat");
+  if (!guard.ok) return guard.response;
+
+  const parsed = BodySchema.safeParse(guard.body);
   if (!parsed.success) {
+    guard.release();
     return Response.json({ error: "درخواست نامعتبر است" }, { status: 400 });
   }
   const { agent, caseId, conversationId, messages } = parsed.data;
@@ -78,8 +84,12 @@ export async function POST(req: NextRequest) {
           message: err instanceof Error ? err.message : "خطای داخلی",
         });
       } finally {
+        guard.release(); // cleanup on completion / error / timeout
         controller.close();
       }
+    },
+    cancel() {
+      guard.release(); // cleanup on client disconnect
     },
   });
 

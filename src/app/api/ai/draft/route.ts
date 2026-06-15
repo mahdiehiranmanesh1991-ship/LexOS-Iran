@@ -6,6 +6,7 @@ import { DRAFT_KIND_FA } from "@/lib/domain/taxonomies";
 import { getTemplate } from "@/lib/domain/templates";
 import { runAgent } from "@/lib/ai/orchestrator";
 import { aiAvailable } from "@/lib/ai/providers";
+import { guardRequest } from "@/lib/security/guard";
 
 export const maxDuration = 180;
 export const dynamic = "force-dynamic";
@@ -28,7 +29,10 @@ const BodySchema = z.discriminatedUnion("mode", [GenerateSchema, ReviseSchema]);
 
 /** Drafting copilot: template-driven generation + inline revision (journey J4). */
 export async function POST(req: NextRequest) {
-  const parsed = BodySchema.safeParse(await req.json().catch(() => null));
+  const guard = await guardRequest(req, "ai_draft");
+  if (!guard.ok) return guard.response;
+
+  const parsed = BodySchema.safeParse(guard.body);
   if (!parsed.success) return Response.json({ error: "درخواست نامعتبر است" }, { status: 400 });
   const db = await getDataSource();
 

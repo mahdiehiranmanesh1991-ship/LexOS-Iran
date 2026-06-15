@@ -5,6 +5,7 @@ import type { AgentCode, AnalysisKind, AnalysisStructured } from "@/lib/domain/t
 import { ANALYSIS_KIND_FA } from "@/lib/domain/taxonomies";
 import { runAgent } from "@/lib/ai/orchestrator";
 import { aiAvailable, completeJSON } from "@/lib/ai/providers";
+import { guardRequest } from "@/lib/security/guard";
 
 export const maxDuration = 180;
 export const dynamic = "force-dynamic";
@@ -46,7 +47,10 @@ const StructuredSchema = z.object({
  * validated JSON panel → both persist to ai_analyses + case timeline.
  */
 export async function POST(req: NextRequest) {
-  const parsed = BodySchema.safeParse(await req.json().catch(() => null));
+  const guard = await guardRequest(req, "ai_analyze");
+  if (!guard.ok) return guard.response;
+
+  const parsed = BodySchema.safeParse(guard.body);
   if (!parsed.success) return Response.json({ error: "درخواست نامعتبر است" }, { status: 400 });
 
   const { caseId, kind, instructions } = parsed.data;
