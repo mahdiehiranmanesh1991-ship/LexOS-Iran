@@ -6,6 +6,7 @@ import { ANALYSIS_KIND_FA } from "@/lib/domain/taxonomies";
 import { runAgent } from "@/lib/ai/orchestrator";
 import { aiAvailable, completeJSON } from "@/lib/ai/providers";
 import { guardRequest } from "@/lib/security/guard";
+import { aiPreflight } from "@/lib/ai/cost-tracker";
 
 export const maxDuration = 180;
 export const dynamic = "force-dynamic";
@@ -58,6 +59,9 @@ export async function POST(req: NextRequest) {
   const c = await db.getCase(caseId);
   if (!c) return Response.json({ error: "پرونده یافت نشد" }, { status: 404 });
 
+  const pre = await aiPreflight({ db, route: "/api/ai/analyze", feature: "analysis" });
+  if (!pre.ok) return pre.response;
+
   const agent = KIND_TO_AGENT[kind];
   const kindFa = ANALYSIS_KIND_FA[kind as AnalysisKind];
 
@@ -84,6 +88,8 @@ export async function POST(req: NextRequest) {
     agent,
     caseId,
     db,
+    tierOverride: pre.tier,
+    cost: { ownerId: pre.ownerId, route: "/api/ai/analyze", feature: "analysis" },
     messages: [{ role: "user", content: instructions ? `${prompt}\n\nملاحظات وکیل: ${instructions}` : prompt }],
   });
 
@@ -91,6 +97,7 @@ export async function POST(req: NextRequest) {
   try {
     structured = await completeJSON({
       tier: "fast",
+      cost: { ownerId: pre.ownerId, route: "/api/ai/analyze", feature: "structured_extract" },
       system:
         "از گزارش حقوقی زیر، فقط JSON با این کلیدها استخراج کن (هر کدام موجود بود): " +
         `risks, weaknesses, opportunities, missing_evidence (آرایه‌ای از {title, detail, severity: "high"|"medium"|"low", citation?}), ` +

@@ -7,6 +7,7 @@ import { getTemplate } from "@/lib/domain/templates";
 import { runAgent } from "@/lib/ai/orchestrator";
 import { aiAvailable } from "@/lib/ai/providers";
 import { guardRequest } from "@/lib/security/guard";
+import { aiPreflight } from "@/lib/ai/cost-tracker";
 
 export const maxDuration = 180;
 export const dynamic = "force-dynamic";
@@ -36,6 +37,10 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return Response.json({ error: "درخواست نامعتبر است" }, { status: 400 });
   const db = await getDataSource();
 
+  const pre = await aiPreflight({ db, route: "/api/ai/draft", feature: "draft" });
+  if (!pre.ok) return pre.response;
+  const cost = { ownerId: pre.ownerId, route: "/api/ai/draft", feature: "draft" as const };
+
   if (parsed.data.mode === "generate") {
     const { templateCode, caseId, instructions } = parsed.data;
     const template = getTemplate(templateCode);
@@ -58,6 +63,8 @@ export async function POST(req: NextRequest) {
         agent: "drafting_agent",
         caseId: caseId ?? null,
         db,
+        tierOverride: pre.tier,
+        cost,
         messages: [{ role: "user", content: prompt }],
       });
       content = result.text;
@@ -95,6 +102,8 @@ export async function POST(req: NextRequest) {
   const result = await runAgent({
     agent: "drafting_agent",
     db,
+    tierOverride: pre.tier,
+    cost,
     messages: [
       {
         role: "user",

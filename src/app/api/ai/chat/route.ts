@@ -4,6 +4,7 @@ import { getDataSource } from "@/lib/data";
 import type { AgentCode } from "@/lib/domain/types";
 import { routeIntent, runAgentStream, type StreamEvent } from "@/lib/ai/orchestrator";
 import { guardRequest } from "@/lib/security/guard";
+import { aiPreflight } from "@/lib/ai/cost-tracker";
 
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
@@ -41,9 +42,21 @@ export async function POST(req: NextRequest) {
   const { agent, caseId, conversationId, messages } = parsed.data;
   const db = await getDataSource();
 
+  // Quota + platform-budget gate (may downgrade the tier under budget pressure).
+  const pre = await aiPreflight({ db, route: "/api/ai/chat", feature: "chat" });
+  if (!pre.ok) {
+    guard.release();
+    return pre.response;
+  }
+  const cost = { ownerId: pre.ownerId, route: "/api/ai/chat", feature: "chat" as const };
+
   const resolvedAgent: AgentCode =
     agent === "auto"
-      ? await routeIntent(messages[messages.length - 1].content)
+      ? await routeIntent(messages[messages.length - 1].content, {
+          ownerId: pre.ownerId,
+          route: "/api/ai/chat",
+          feature: "intent_route",
+        })
       : (agent as AgentCode);
 
   const encoder = new TextEncoder();
@@ -59,6 +72,8 @@ export async function POST(req: NextRequest) {
           messages,
           caseId: caseId ?? null,
           db,
+          tierOverride: pre.tier,
+          cost,
         })) {
           if (ev.type === "token") fullText += ev.text;
           if (ev.type === "citations") finalCitations = ev;

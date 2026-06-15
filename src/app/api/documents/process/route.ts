@@ -4,6 +4,7 @@ import type { DocType } from "@/lib/domain/types";
 import { aiAvailable, anthropic, complete, hasAnthropic, modelFor } from "@/lib/ai/providers";
 import { createSupabaseServerClient, isDemoMode } from "@/lib/supabase/server";
 import { guardRequest } from "@/lib/security/guard";
+import { aiPreflight, recordUsage } from "@/lib/ai/cost-tracker";
 
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
@@ -38,6 +39,11 @@ export async function POST(req: NextRequest) {
   }
 
   const db = await getDataSource();
+
+  // Quota + budget gate (covers the expensive OCR/classify AI below).
+  const pre = await aiPreflight({ db, route: "/api/documents/process", feature: "doc_ocr" });
+  if (!pre.ok) return pre.response;
+  const ocrModel = modelFor(pre.tier).model;
 
   // 1) Persist the file to private storage (production mode only).
   let storagePath: string | null = null;
@@ -84,7 +90,7 @@ export async function POST(req: NextRequest) {
         const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
         const mediaType = file.type as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
         const res = await anthropic().messages.create({
-          model: modelFor("core").model,
+          model: ocrModel,
           max_tokens: 4096,
           messages: [
             {
@@ -97,6 +103,15 @@ export async function POST(req: NextRequest) {
           ],
         });
         text = res.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+        await recordUsage({
+          ownerId: pre.ownerId,
+          route: "/api/documents/process",
+          feature: "doc_ocr",
+          provider: "anthropic",
+          model: ocrModel,
+          tokensIn: res.usage.input_tokens,
+          tokensOut: res.usage.output_tokens,
+        });
       }
     }
 

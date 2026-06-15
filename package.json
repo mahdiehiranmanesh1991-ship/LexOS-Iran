@@ -7,9 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx scripts/test-deadlines.ts && tsx scripts/test-rate-limit.ts",
+    "test": "tsx scripts/test-deadlines.ts && tsx scripts/test-rate-limit.ts && tsx scripts/test-cost-control.ts",
     "test:deadlines": "tsx scripts/test-deadlines.ts",
     "test:security": "tsx scripts/test-rate-limit.ts",
+    "test:cost": "tsx scripts/test-cost-control.ts",
     "seed:reference": "tsx scripts/seed-reference-data.ts",
     "start:demo": "DEMO_MODE=1 next start"
   },

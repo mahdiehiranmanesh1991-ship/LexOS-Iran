@@ -5,8 +5,10 @@ import type { DataSource } from "@/lib/data/types";
 import type { AgentCode, Citation } from "@/lib/domain/types";
 import { AGENT_FA } from "@/lib/domain/taxonomies";
 import { getAgent } from "./agents";
-import { aiAvailable, anthropic, hasAnthropic, complete, modelFor } from "./providers";
+import { aiAvailable, anthropic, hasAnthropic, complete, modelFor, type Tier } from "./providers";
 import { executeTool, TOOL_DEFINITIONS, type ProposedAction } from "./tools";
+import { recordUsage } from "./cost-tracker";
+import type { CallCost } from "./cost-control";
 
 /**
  * Agent execution engine (docs/09).
@@ -42,6 +44,10 @@ export interface RunInput {
   messages: { role: "user" | "assistant"; content: string }[];
   caseId?: string | null;
   db: DataSource;
+  /** Governance-resolved tier (budget may downgrade the agent's default). */
+  tierOverride?: Tier;
+  /** When present, token usage + cost are recorded against this principal. */
+  cost?: CallCost;
 }
 
 export interface RunResult {
@@ -52,11 +58,12 @@ export interface RunResult {
 }
 
 /** Pick the right specialist for a free-form question (fast intent routing). */
-export async function routeIntent(question: string): Promise<AgentCode> {
+export async function routeIntent(question: string, cost?: CallCost): Promise<AgentCode> {
   if (!aiAvailable()) return "orchestrator";
   try {
     const answer = await complete({
       tier: "fast",
+      cost,
       system:
         "نقش: مسیریاب. پرسش وکیل را بخوان و فقط یکی از این کدها را برگردان (بدون هیچ متن دیگر):\n" +
         "deadline_agent (مهلت/موعد/ابلاغ/واخواهی/تجدیدنظر زمان‌دار)، contract_agent (تحلیل قرارداد)، " +
@@ -89,10 +96,12 @@ export async function* runAgentStream(input: RunInput): AsyncGenerator<StreamEve
     return;
   }
 
-  const { model } = modelFor(spec.tier);
+  const { model } = modelFor(input.tierOverride ?? spec.tier);
   const citations: Citation[] = [];
   const actions: ProposedAction[] = [];
   const seenCitations = new Set<string>();
+  let usageIn = 0;
+  let usageOut = 0;
 
   const collect = (cs?: Citation[], as?: ProposedAction[]) => {
     for (const c of cs ?? []) {
@@ -113,7 +122,8 @@ export async function* runAgentStream(input: RunInput): AsyncGenerator<StreamEve
     // OpenAI-only fallback: no tool use — answer directly with degraded grounding.
     try {
       const text = await complete({
-        tier: spec.tier,
+        tier: input.tierOverride ?? spec.tier,
+        cost: input.cost,
         system:
           spec.system +
           caseHint +
@@ -158,11 +168,22 @@ export async function* runAgentStream(input: RunInput): AsyncGenerator<StreamEve
       }
 
       const message = await stream.finalMessage();
+      usageIn += message.usage.input_tokens;
+      usageOut += message.usage.output_tokens;
       const toolUses = message.content.filter(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
       );
 
       if (message.stop_reason !== "tool_use" || toolUses.length === 0) {
+        if (input.cost) {
+          await recordUsage({
+            ...input.cost,
+            provider: "anthropic",
+            model,
+            tokensIn: usageIn,
+            tokensOut: usageOut,
+          });
+        }
         yield { type: "citations", citations };
         if (actions.length) yield { type: "actions", actions };
         yield { type: "done", model };
